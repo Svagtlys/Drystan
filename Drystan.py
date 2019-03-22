@@ -301,6 +301,7 @@ def toInt(nonint):
 
 bot.run('') #where 'inside miniquotes' is bot token
 
+## This was my very first Discord.py command for Drystan
 ##@bot.command()
 ##async def sum(ctx, *nums):
 ##    '''
