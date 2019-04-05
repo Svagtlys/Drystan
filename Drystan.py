@@ -34,13 +34,13 @@ async def ping(ctx):
 
 
 @bot.command()
-async def sheet(ctx, inputsheet): #will be expanded later for the purposes of character importation
+async def importchar(ctx, inputsheet): #will be expanded later for the purposes of character importation
     '''
     This command will accept the name of a shared google sheet following the DRPG character sheet template, and will be able to parse the data on "Helper Sheet 1" of it. Currently only returns the data found on that sheet.
     '''
     savedvars = gc.open(inputsheet).worksheet("Helper Sheet 1") #accepts the name for a google sheet and finds the saved variables worksheet
     
-    await ctx.send(savedvars.get_all_records())
+    await ctx.send(savedvars.get_all_values())
 
 
 @bot.command()
@@ -162,20 +162,45 @@ async def roll(ctx, *, content:str):
 @bot.command()
 async def rolltable(ctx, inputsheet):
     '''
-    Rolls given a table with a sheet of "Main". See Table for Drystan for formatting.  Must be shared with sheeteditor@drystan.iam.gserviceaccount.com
+    Pass read enable sharing link
+    Rolls given a table with a sheet of "Main". See "Table for Drystan" for formatting.  Must be shared with sheeteditor@drystan.iam.gserviceaccount.com
     '''
-    #result = ""
+    result = ""
 
-    sheet = gc.open(inputsheet)
-    currtablevars = sheet.worksheet("Main").get_all_records()
+    if inputsheet[0] == "<":
+        inputsheet = inputsheet[1:len(inputsheet)-1]
 
-    #read A1 to determine dice type
-    #roll = 0
+    sheet = gc.open_by_url(inputsheet)
+    currtable = sheet.worksheet("Main")
+    info = currtable.get_all_values() #list of lists [row][col]
+    foundrow = roll_on_table(info)
 
-    await ctx.send(currtablevars)
+    name1 = info[foundrow][1]
+    desc1 = info[foundrow][2]
+    name2 = ""
+    desc2 = ""
+    if info[foundrow][3] == "TRUE":
+        currtable = sheet.worksheet(name1)
+        info = currtable.get_all_values() #list of lists [row][col]
+        foundrow = roll_on_table(info)
+        name2 = info[foundrow][1]
+        desc2 = info[foundrow][2]
+
+    try:
+        embed = discord.Embed(title = "**" + name1 + "**", description = "*" + desc1 + "*" if desc1 else "", color=0x89eaf8)
+    except HTTPException:
+        await ctx.send("Your title and description are too long!  Shorten one or both.")
+
+    if embed and name2:
+        try:
+            embed.add_field(name = name2, value = desc2 if desc2 else "\u200b", inline = True)
+        except HTTPException:
+            await ctx.send("Your secondary title and description are too long!  Shorten one or both.")
+    
+    await ctx.send(None, embed = embed)
 
 
-@bot.command(pass_context=True) 
+@bot.command(pass_context=True) #non-functioning
 async def savetable(ctx, inputsheet):
     '''
     Doesn't save the table yet, because I've decided SQL would be better for storing, but I haven't yet learned it.
@@ -188,6 +213,7 @@ async def savetable(ctx, inputsheet):
     #tablesheet = gc.open("Drystan's Secret Sheet").worksheet("Saved Tables")
     await ctx.send(author.mention + ", I've saved your table named " + name + " which can be found at " + link)
 
+# Helper Functions
 
 def listToString(separator, mylist):
     result = ""
@@ -209,7 +235,6 @@ def toInt(nonint):
     return int(re.compile(r"[0-9]+", re.I).search(str(nonint)).group(0))
 
 
-#find embed info
 def find_embed_info(content):
     regextitle = r'\s(&t\s?")([^"]+)(")'
     regexdesc = r'\s(&d\s?")([^"]+)(")'
@@ -268,7 +293,6 @@ def find_roll_info(content):
     
     return [content, numsides, numdice, errorList, impossible]
 
-
 def find_operation_info(content):
     regexoperation = r"[\s]?[(\+)(\-)(\*)(/)(\%)(\^)][\s]?[0-9]+"
     operations = []
@@ -280,7 +304,6 @@ def find_operation_info(content):
         matchcase = re.compile(regexoperation, re.I).search(content)
 
     return [content, operations]
-
 
 def find_vantage_info(content):
     regexvantage = r"\s([ad]van)"
@@ -297,7 +320,6 @@ def find_vantage_info(content):
 
     return [content, vantage]
 
-
 def find_explosion_info(content):
     regexexplosion = r"!{1,2}[0-9]*"
     explosion = ""
@@ -310,7 +332,6 @@ def find_explosion_info(content):
     return [content, explosion]
 
 
-# roll_dice function 
 def run_roll(numdice, numsides, vantage, explosion, operations):
     rolls = []
     formattedrolls = []
@@ -336,7 +357,6 @@ def run_roll(numdice, numsides, vantage, explosion, operations):
     #return everything
     return [rolls, formattedrolls, errorList]
     
-
 def run_vantage(rolls, formattedrolls, vantage, numdice, numsides):
     #add second layer of dice rolls
     if vantage != 0:
@@ -358,7 +378,6 @@ def run_vantage(rolls, formattedrolls, vantage, numdice, numsides):
             rolls[maxind] = float('-inf')
 
     return [rolls, formattedrolls]
-
 
 def run_explosion(rolls, formattedrolls, explosion, numdice, numsides):
     errorList = []
@@ -406,7 +425,6 @@ def run_explosion(rolls, formattedrolls, explosion, numdice, numsides):
 
     return [rolls, formattedrolls, errorList]
             
-
 def run_operations(rolls, operations):
     errorList = []
     total = 0
@@ -458,48 +476,32 @@ def format_roll(rolls, formattedrolls, numsides):
     return [rolls, formattedrolls]
 
 
-##@bot.command()
-##async def sum(ctx, *nums):
-##    '''
-##    This command adds two or more numbers together
-##    '''
-##    try:
-##        result = 0
-##
-##        for index in range(len(nums)):
-##            result += int(nums[index])
-##            
-##    except ValueError:
-##        await ctx.send("That's an invalid argument!")
-##        print("sumall ValueError")
-##        
-##    else:
-##        await ctx.send(result)
+def roll_on_table(info):
+    dicetype = int(re.search("^([0-9]+)(d)([0-9]+)", info[0][0], re.I).group(3))
+    roll = randint(0, dicetype)
+    maxrow = len(info)-1
+    minrow = 1
+    foundrow = minrow + int((maxrow-minrow)/2)
+    while(minrow <= maxrow):
+        cellvalue = info[foundrow][0]
+        if "-" in cellvalue:
+            foundrange = range(int(re.search('^([0-9]+)', cellvalue).group(1)), int(re.search('(?:-)([0-9]+)', cellvalue).group(1)))
+            if roll in foundrange:
+                break
+            elif roll > max(foundrange):
+                minrow = foundrow+1
+            else: #roll < min(foundrange)
+                maxrow = foundrow-1
+        else:
+            foundrange = int(re.search('^([0-9]+)', cellvalue).group(1))
+            if roll == foundrange:
+                break
+            elif roll > foundrange:
+                minrow = foundrow+1
+            else: #roll < foundrange
+                maxrow = foundrow-1
+        foundrow = minrow + int((maxrow-minrow)/2)
+    return foundrow
 
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
-## SUPER SECRET TOKEN AND ALL
 
 bot.run('') #where 'inside miniquotes' is bot token
